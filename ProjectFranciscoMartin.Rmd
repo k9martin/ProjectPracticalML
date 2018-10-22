@@ -1,0 +1,163 @@
+---
+title: "Course Project"
+author: "Francisco Martín"
+date: "October 22, 2018"
+output: html_document
+---
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## Data processing
+
+### Download data:
+
+First of all we have to download data in our present directory and load it:
+
+```{r download_data}
+
+path_test <- file.path(getwd(),"test_data.csv")
+path_train <- file.path(getwd(),"train_data.csv")
+
+url_test <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+url_train <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+if (!file.exists(path_test)) {
+        download.file(url_train, path_train, mode = "wb")
+        download.file(url_test, path_test, mode= "wb")
+}
+
+training <- read.csv(path_train)
+testing <- read.csv(path_test)
+str(training)
+```
+
+In order to obtain reproducibility, we are going to set the seed in 1994 (arbitrarely, I born on 
+this year). Also we will load all libraries we will use on the project:
+
+``` {r seed_and_libraries}
+set.seed(1994)
+library(caret)
+library(ggplot2)
+library(randomForest)
+library(rpart)
+```
+
+ 
+We have to remove all variables with more than 95% of NA or empty values because they will not aport anything. 
+Also we can discart first seven variables because they don't give any information:
+
+```{r remove_vars}
+index_columns_NA_train <- which(colSums(is.na(training) |training=="")>0.95*length(training[,1]))
+# Let's see if they are same columns that in testing. If they are not, we have to simplify in some way:
+index_columns_NA_testing <- which(colSums(is.na(testing) |testing=="")>0.95*length(testing[,1]))
+sum(index_columns_NA_train-index_columns_NA_testing)
+
+# Fine! They are equal, so we can substract those columns to our dataset:
+training <- training[, -index_columns_NA_train]
+testing <- testing[, -index_columns_NA_testing]
+
+#Now substract those rows which gives no information:
+
+training <- training[, -c(1:7)]
+testing <- testing[, -c(1:7)]
+```
+
+Before start with training, we will split training data into a training and a testing data, and 
+use original testing data as cross validation:
+
+``` {r separe_training}
+inTrain <- createDataPartition(training$classe, p=3/4)[[1]]
+training_final <- training[inTrain,]
+testing_final <- training[-inTrain,]
+testing_noclasse <- testing
+testing <- testing_final 
+training <- training_final 
+remove(testing_final,training_final)
+```
+
+Now we have three clean datasets (training, testing and cross_validation) with 53 variables, 
+including the one we want to predict: "classe".
+
+## Training models
+
+I will train three different models, and compare which one is the most accurate on testing dataset. Models I will 
+train are decission tree, random forest and gradient boosting method. Also, we will try to limit overfitting using 
+cross-validation technique: using 5 folds. Usually 5 or 10 are used, but here 10 gives a higher running time with 
+no improvement of accuracy.
+
+Decission tree:
+
+``` {r model_dt} 
+overfit_control <- trainControl(method="cv", number=5)
+model_decissiontree <- train(classe~., data=training, method="rpart", trControl=overfit_control)
+```
+
+Random forest:
+
+```{r model_rf}
+model_randomforest <- train(classe~., data = training, method = "rf", trControl = overfit_control)
+```
+
+Gradient boosting method:
+
+``` {r model_gbm}
+model_gradientboosting <- train(classe~., data=training, method="gbm", trControl = overfit_control, verbose = FALSE)
+```
+
+## Comparing models accuracy
+
+Once we have all three models trained, we can compare them and see which one has the better accuracy on our training 
+set:
+
+``` {r compare_models}
+
+predict_dt <- predict(model_decissiontree, testing)
+predict_rf <- predict(model_randomforest, testing)
+predict_gbm <- predict(model_gradientboosting,testing)
+
+cm_dt <- confusionMatrix(predict_dt, testing$classe)
+cm_rf <- confusionMatrix(predict_rf, testing$classe)
+cm_gbm <- confusionMatrix(predict_gbm,testing$classe)
+
+# We can look at any independent model or compare accuracy directly. Let's do both:
+
+model_decissiontree
+model_randomforest
+model_gradientboosting
+
+# But it is more simple to compare directly accuracy:
+
+cm_dt$overall['Accuracy']
+cm_rf$overall['Accuracy']
+cm_gbm$overall['Accuracy']
+
+```
+
+## Model selection
+
+Looking at results for accuracy, looks like best choice is random forest, with a 
+`r round(cm_rf$overall['Accuracy'],4)*100`% of accuracy. Gradient boosting also performs fine, with 
+a `r round(cm_gbm$overall['Accuracy'],4)*100`% of accuracy. On the other hand, decission tree performs 
+really poorly, with only a `r round(cm_dt$overall['Accuracy'],4)*100`% of accuracy.
+
+## Prediction
+
+Once we have choose random forest as our model, we can predict on testing set and see how well 
+our model performs:
+
+``` {r final_prediction}
+prediction <- predict(model_randomforest, testing_noclasse)
+prediction
+```
